@@ -6,36 +6,66 @@ let config = {
 };
 
 // Initialize PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
 
 // Event listeners
-document.getElementById('fileInput').addEventListener('change', handleFileSelect);
-document.getElementById('sheetName').addEventListener('input', updateSheetNameDisplay);
+window.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('fileInput');
+    const sheetNameInput = document.getElementById('sheetName');
+    
+    if (fileInput) {
+        fileInput.addEventListener('change', handleFileSelect);
+    }
+    
+    if (sheetNameInput) {
+        sheetNameInput.addEventListener('input', updateSheetNameDisplay);
+    }
+});
 
 // Copy code function
 function copyCode() {
     const code = document.getElementById('appsScriptCode').textContent;
     navigator.clipboard.writeText(code).then(() => {
         const btn = document.querySelector('.copy-btn');
+        const originalText = btn.textContent;
         btn.textContent = '✓ Copied!';
+        btn.style.background = '#10b981';
         setTimeout(() => {
-            btn.textContent = '📋 Copy Code';
+            btn.textContent = originalText;
+            btn.style.background = '#667eea';
         }, 2000);
+    }).catch(err => {
+        alert('Gagal copy. Silakan copy manual.');
     });
 }
 
 // Save configuration
 function saveConfig() {
-    config.webAppUrl = document.getElementById('webAppUrl').value.trim();
-    config.sheetName = document.getElementById('sheetName').value.trim();
+    const webAppUrlInput = document.getElementById('webAppUrl');
+    const sheetNameInput = document.getElementById('sheetName');
+    
+    if (!webAppUrlInput || !sheetNameInput) {
+        alert('Error: Form tidak ditemukan. Refresh halaman dan coba lagi.');
+        return;
+    }
+    
+    config.webAppUrl = webAppUrlInput.value.trim();
+    config.sheetName = sheetNameInput.value.trim();
 
     if (!config.webAppUrl) {
-        alert('Mohon isi Web App URL dari Google Apps Script');
+        alert('❌ Mohon isi Web App URL dari Google Apps Script');
         return;
     }
 
     if (!config.webAppUrl.includes('script.google.com')) {
-        alert('URL tidak valid. Pastikan URL dari Google Apps Script');
+        alert('❌ URL tidak valid. Pastikan URL dari Google Apps Script\n\nFormat: https://script.google.com/macros/s/.../exec');
+        return;
+    }
+
+    if (!config.webAppUrl.endsWith('/exec')) {
+        alert('⚠️ URL harus diakhiri dengan /exec\n\nPastikan menggunakan Web App URL, bukan Test deployment URL');
         return;
     }
 
@@ -43,22 +73,26 @@ function saveConfig() {
     document.getElementById('editConfigBtn').style.display = 'block';
     document.getElementById('uploadSection').style.display = 'block';
 
-    alert('Konfigurasi berhasil disimpan!');
+    alert('✅ Konfigurasi berhasil disimpan!\n\nSekarang Anda bisa upload file PDF/gambar.');
 }
 
 // Toggle configuration visibility
 function toggleConfig() {
     const configSection = document.getElementById('configSection');
+    const editBtn = document.getElementById('editConfigBtn');
     const isVisible = configSection.style.display !== 'none';
     
     configSection.style.display = isVisible ? 'none' : 'block';
-    document.getElementById('editConfigBtn').textContent = isVisible ? '⚙️ Edit Konfigurasi' : '❌ Tutup Konfigurasi';
+    editBtn.textContent = isVisible ? '⚙️ Edit Konfigurasi' : '❌ Tutup Konfigurasi';
 }
 
 // Update sheet name display
 function updateSheetNameDisplay() {
     const sheetName = document.getElementById('sheetName').value;
-    document.getElementById('sheetNameDisplay').textContent = sheetName;
+    const displayElement = document.getElementById('sheetNameDisplay');
+    if (displayElement) {
+        displayElement.textContent = sheetName;
+    }
     document.querySelectorAll('.sheet-name-ref').forEach(el => {
         el.textContent = sheetName;
     });
@@ -220,27 +254,30 @@ async function sendToGoogleSheets(poData) {
         poData.description
     ]);
 
-    const response = await fetch(config.webAppUrl, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            sheetName: config.sheetName,
-            rows: rows
-        })
-    });
+    try {
+        const response = await fetch(config.webAppUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sheetName: config.sheetName,
+                rows: rows
+            }),
+            mode: 'no-cors'
+        });
 
-    // Note: mode 'no-cors' tidak bisa baca response, tapi request tetap terkirim
-    // Kita asumsikan berhasil jika tidak ada error
-    return { success: true };
+        // Mode no-cors tidak bisa baca response, tapi request tetap terkirim
+        return { success: true };
+    } catch (error) {
+        throw new Error('Gagal mengirim ke Google Sheets: ' + error.message);
+    }
 }
 
 // Process all files
 async function processFiles() {
     if (selectedFiles.length === 0) {
-        alert('Pilih file PDF atau gambar terlebih dahulu');
+        alert('❌ Pilih file PDF atau gambar terlebih dahulu');
         return;
     }
 
@@ -257,7 +294,7 @@ async function processFiles() {
         try {
             // Update progress
             document.getElementById('progressText').textContent = 
-                `Processing ${i + 1}/${selectedFiles.length}: ${file.name}...`;
+                `⏳ Processing ${i + 1}/${selectedFiles.length}: ${file.name}...`;
 
             let text = '';
             
@@ -272,12 +309,16 @@ async function processFiles() {
             
             const poData = parsePoData(text);
             
+            if (poData.items.length === 0) {
+                throw new Error('Tidak ada data item yang ditemukan. Pastikan format PO sesuai.');
+            }
+            
             await sendToGoogleSheets(poData);
             
             results.push({
                 fileName: file.name,
                 status: 'success',
-                poNumber: poData.poNumber,
+                poNumber: poData.poNumber || 'N/A',
                 itemCount: poData.items.length,
                 fileType: file.type.startsWith('image/') ? 'image' : 'pdf'
             });
@@ -335,4 +376,7 @@ function displayResults(results) {
     });
     
     resultsSection.style.display = 'block';
+    
+    // Scroll to results
+    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
