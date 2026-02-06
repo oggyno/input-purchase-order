@@ -24,12 +24,12 @@
 
             <!-- Configuration Section -->
             <div id="configSection" class="config-section">
-                <h2>Konfigurasi Google Sheets</h2>
+                <h2>⚙️ Konfigurasi Google Sheets</h2>
                 
                 <div class="form-group">
                     <label>Web App URL (dari Google Apps Script)</label>
-                    <input type="text" id="webAppUrl" placeholder="Paste Web App URL di sini">
-                    <p class="help-text">Format: https://script.google.com/macros/s/.../exec</p>
+                    <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/.../exec">
+                    <p class="help-text">Paste URL Web App dari Google Apps Script</p>
                 </div>
 
                 <div class="form-group">
@@ -38,22 +38,20 @@
                     <p class="help-text">Data akan masuk ke sheet: <strong><span id="sheetNameDisplay">Dataset Purchase Order</span></strong></p>
                 </div>
 
-                <button class="btn-primary" onclick="saveConfig()">Simpan Konfigurasi</button>
+                <button class="btn-primary" onclick="saveConfig()">💾 Simpan Konfigurasi</button>
 
                 <div class="alert alert-warning">
-                    <p class="alert-title">Cara Setup Google Apps Script:</p>
+                    <p class="alert-title">📌 Cara Setup Google Apps Script:</p>
                     <ol>
                         <li>Buka Google Sheet Anda</li>
                         <li>Klik <strong>Extensions</strong> → <strong>Apps Script</strong></li>
-                        <li>Hapus kode yang ada, paste kode dari "Setup Guide" di bawah</li>
+                        <li>Hapus kode yang ada, paste kode dari bagian bawah halaman ini</li>
                         <li>Klik <strong>Deploy</strong> → <strong>New deployment</strong></li>
                         <li>Pilih type: <strong>Web app</strong></li>
-                        <li>Execute as: <strong>Me</strong></li>
-                        <li>Who has access: <strong>Anyone</strong></li>
-                        <li>Klik <strong>Deploy</strong> dan copy <strong>Web app URL</strong></li>
-                        <li>Paste URL tersebut ke form di atas</li>
+                        <li>Execute as: <strong>Me</strong> | Who has access: <strong>Anyone</strong></li>
+                        <li>Klik <strong>Deploy</strong> dan <strong>Copy Web app URL</strong></li>
+                        <li>Paste URL tersebut ke form di atas ☝️</li>
                     </ol>
-                    <p style="margin-top: 1rem; font-weight: 600;">📋 Lihat panduan lengkap di bagian bawah halaman!</p>
                 </div>
             </div>
 
@@ -64,7 +62,7 @@
             <!-- File Upload Section -->
             <div id="uploadSection" style="display: none;">
                 <div class="form-group">
-                    <label>Upload PDF atau Gambar (Batch Input)</label>
+                    <label>📁 Upload PDF atau Gambar (Batch Input)</label>
                     <div class="upload-area" id="uploadArea">
                         <input type="file" id="fileInput" multiple accept=".pdf,image/jpeg,image/jpg,image/png" style="display: none;">
                         <label for="fileInput" class="upload-label">
@@ -83,13 +81,13 @@
                     </div>
                     
                     <div id="fileList" class="file-list" style="display: none;">
-                        <p class="file-list-title"><span id="fileCount">0</span> file terpilih:</p>
+                        <p class="file-list-title">📋 <span id="fileCount">0</span> file terpilih:</p>
                         <div id="fileListContent"></div>
                     </div>
                 </div>
 
                 <button class="btn-process" id="processBtn" onclick="processFiles()" disabled>
-                    Process & Send to Google Sheets
+                    🚀 Process & Send to Google Sheets
                 </button>
 
                 <div id="progressSection" class="progress-section" style="display: none;">
@@ -100,40 +98,30 @@
 
             <!-- Results Section -->
             <div id="resultsSection" class="results-section" style="display: none;">
-                <h2>Hasil Proses:</h2>
+                <h2>✅ Hasil Proses:</h2>
                 <div id="resultsContent"></div>
             </div>
 
             <!-- Info Section -->
             <div class="info-section">
-                <h3>Data yang akan diekstrak:</h3>
+                <h3>📊 Data yang akan diekstrak:</h3>
                 <div class="info-grid">
                     <div class="info-item">✓ PO Number</div>
                     <div class="info-item">✓ Item Code</div>
                     <div class="info-item">✓ PO Date</div>
                     <div class="info-item">✓ Nama Barang</div>
-                    <div class="info-item">✓ Nama Supplier (To: ...)</div>
+                    <div class="info-item">✓ Nama Supplier</div>
                     <div class="info-item">✓ Quantity</div>
-                    <div class="info-item" style="grid-column: span 2;">✓ Description (bagian bawah)</div>
+                    <div class="info-item" style="grid-column: span 2;">✓ Description</div>
                 </div>
             </div>
 
             <!-- Setup Guide Section -->
             <div class="setup-guide">
-                <h3>📋 Setup Guide - Google Apps Script</h3>
+                <h3>📋 Setup Guide - Google Apps Script Code</h3>
                 
                 <div class="guide-step">
-                    <h4>Step 1: Buka Google Sheet</h4>
-                    <p>Buka Google Sheet yang ingin Anda gunakan untuk menyimpan data PO</p>
-                </div>
-
-                <div class="guide-step">
-                    <h4>Step 2: Buka Apps Script</h4>
-                    <p>Di menu Google Sheet, klik: <strong>Extensions</strong> → <strong>Apps Script</strong></p>
-                </div>
-
-                <div class="guide-step">
-                    <h4>Step 3: Paste Kode Ini</h4>
+                    <h4>Step 1: Copy Kode Ini</h4>
                     <div class="code-block">
                         <button class="copy-btn" onclick="copyCode()">📋 Copy Code</button>
                         <pre id="appsScriptCode">function doPost(e) {
@@ -159,7 +147,7 @@
     
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
-      message: `${rows.length} rows added to ${sheetName}`
+      message: rows.length + ' rows added to ' + sheetName
     })).setMimeType(ContentService.MimeType.JSON);
     
   } catch (error) {
@@ -173,32 +161,37 @@
                 </div>
 
                 <div class="guide-step">
-                    <h4>Step 4: Deploy Web App</h4>
+                    <h4>Step 2: Paste ke Apps Script</h4>
                     <ol>
-                        <li>Klik tombol <strong>"Deploy"</strong> (di kanan atas)</li>
-                        <li>Pilih <strong>"New deployment"</strong></li>
-                        <li>Klik icon ⚙️ (gear) → pilih <strong>"Web app"</strong></li>
-                        <li>Isi konfigurasi:
-                            <ul>
-                                <li><strong>Execute as:</strong> Me (email Anda)</li>
-                                <li><strong>Who has access:</strong> Anyone</li>
-                            </ul>
-                        </li>
-                        <li>Klik <strong>"Deploy"</strong></li>
-                        <li>Authorize akses (klik email Anda → Allow)</li>
-                        <li><strong>Copy "Web app URL"</strong> yang muncul</li>
+                        <li>Buka Google Sheet → <strong>Extensions</strong> → <strong>Apps Script</strong></li>
+                        <li>Hapus semua kode yang ada</li>
+                        <li>Paste kode di atas</li>
+                        <li>Klik <strong>💾 Save</strong></li>
                     </ol>
                 </div>
 
                 <div class="guide-step">
-                    <h4>Step 5: Paste URL ke Form</h4>
-                    <p>Paste Web App URL yang sudah di-copy ke form <strong>"Web App URL"</strong> di atas, lalu klik <strong>"Simpan Konfigurasi"</strong></p>
+                    <h4>Step 3: Deploy sebagai Web App</h4>
+                    <ol>
+                        <li>Klik <strong>Deploy</strong> → <strong>New deployment</strong></li>
+                        <li>Klik icon ⚙️ → pilih <strong>Web app</strong></li>
+                        <li>Isi:
+                            <ul>
+                                <li><strong>Execute as:</strong> Me</li>
+                                <li><strong>Who has access:</strong> Anyone</li>
+                            </ul>
+                        </li>
+                        <li>Klik <strong>Deploy</strong></li>
+                        <li>Klik <strong>Authorize access</strong> → pilih akun Anda</li>
+                        <li>Klik <strong>Advanced</strong> → <strong>Go to ... (unsafe)</strong> → <strong>Allow</strong></li>
+                        <li><strong>Copy Web app URL</strong> yang muncul</li>
+                    </ol>
                 </div>
 
                 <div class="alert" style="background: #dbeafe; border-color: #93c5fd; margin-top: 1rem;">
-                    <p style="color: #1e40af; font-size: 0.875rem;">
-                        💡 <strong>Tips:</strong> Web App URL format-nya seperti ini:<br>
-                        <code style="background: white; padding: 0.25rem 0.5rem; border-radius: 0.25rem; display: inline-block; margin-top: 0.5rem;">
+                    <p style="color: #1e40af; font-size: 0.875rem; margin: 0;">
+                        💡 <strong>Format URL yang benar:</strong><br>
+                        <code style="background: white; padding: 0.5rem; border-radius: 0.25rem; display: block; margin-top: 0.5rem; word-break: break-all;">
                             https://script.google.com/macros/s/AKfycbxxxxxxxxxxxxx/exec
                         </code>
                     </p>
