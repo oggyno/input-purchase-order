@@ -93,9 +93,6 @@ function updateSheetNameDisplay() {
     if (displayElement) {
         displayElement.textContent = sheetName;
     }
-    document.querySelectorAll('.sheet-name-ref').forEach(el => {
-        el.textContent = sheetName;
-    });
 }
 
 // Handle file selection
@@ -137,9 +134,9 @@ function displayFileList() {
     });
 }
 
-// Extract text from PDF
+// Extract text from PDF (DIPERBAIKI: fallback OCR jika text kosong)
 async function extractTextFromPDF(file) {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         const reader = new FileReader();
         
         reader.onload = async (e) => {
@@ -148,6 +145,7 @@ async function extractTextFromPDF(file) {
                 const pdf = await pdfjsLib.getDocument(typedArray).promise;
                 let fullText = '';
                 
+                // Coba extract text native dulu
                 for (let i = 1; i <= pdf.numPages; i++) {
                     const page = await pdf.getPage(i);
                     const textContent = await page.getTextContent();
@@ -155,15 +153,68 @@ async function extractTextFromPDF(file) {
                     fullText += pageText + '\n';
                 }
                 
-                resolve(fullText);
+                console.log('✅ PDF native text extracted:', fullText.substring(0, 500) + '...');
+                
+                // Jika text terlalu pendek, coba OCR
+                if (fullText.trim().length < 100) {
+                    console.log('⚠️ Native text terlalu pendek, mencoba OCR...');
+                    const ocrText = await ocrPdfPages(typedArray);
+                    console.log('✅ PDF OCR text:', ocrText.substring(0, 500) + '...');
+                    resolve(ocrText);
+                } else {
+                    resolve(fullText);
+                }
             } catch (error) {
-                reject(error);
+                console.error('❌ Native text extraction failed:', error);
+                // Fallback: OCR via canvas render
+                try {
+                    const ocrText = await ocrPdfPages(typedArray);
+                    console.log('✅ PDF OCR fallback success:', ocrText.substring(0, 500) + '...');
+                    resolve(ocrText);
+                } catch (ocrError) {
+                    console.error('❌ OCR failed:', ocrError);
+                    reject(ocrError);
+                }
             }
         };
         
         reader.onerror = reject;
         reader.readAsArrayBuffer(file);
     });
+}
+
+// Fungsi baru: OCR PDF pages via canvas + Tesseract
+async function ocrPdfPages(arrayBuffer) {
+    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+    let fullText = '';
+    
+    for (let i = 1; i <= pdf.numPages; i++) {
+        console.log(`OCR page ${i}/${pdf.numPages}...`);
+        
+        const page = await pdf.getPage(i);
+        const scale = 2.0; // Tinggi untuk akurasi OCR
+        const viewport = page.getViewport({ scale });
+        
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        
+        const renderContext = {
+            canvasContext: context,
+            viewport: viewport
+        };
+        
+        await page.render(renderContext).promise;
+        
+        const worker = await Tesseract.createWorker('eng+ind'); // Support English + Indonesia
+        const { data: { text } } = await worker.recognize(canvas);
+        await worker.terminate();
+        
+        fullText += text + '\n--- PAGE ' + i + ' ---\n';
+    }
+    
+    return fullText;
 }
 
 // Extract text from image using OCR
@@ -173,12 +224,15 @@ async function extractTextFromImage(file) {
         
         reader.onload = async (e) => {
             try {
-                const worker = await Tesseract.createWorker('eng');
+                console.log('OCR image:', file.name);
+                const worker = await Tesseract.createWorker('eng+ind');
                 const { data: { text } } = await worker.recognize(e.target.result);
                 await worker.terminate();
                 
+                console.log('✅ Image OCR text:', text.substring(0, 500) + '...');
                 resolve(text);
             } catch (error) {
+                console.error('❌ Image OCR failed:', error);
                 reject(error);
             }
         };
@@ -188,8 +242,10 @@ async function extractTextFromImage(file) {
     });
 }
 
-// Parse PO data from text
+// Parse PO data (DIPERBAIKI: regex lebih fleksibel)
 function parsePoData(text) {
+    console.log('🔍 Parsing text sample:', text.substring(0, 1000));
+    
     const data = {
         poNumber: '',
         poDate: '',
@@ -198,43 +254,78 @@ function parsePoData(text) {
         description: ''
     };
 
-    // Extract PO Number
-    const poNumberMatch = text.match(/PO Number\s*:\s*(\S+)/i);
-    if (poNumberMatch) data.poNumber = poNumberMatch[1].trim();
+    const normalizedText = text.toLowerCase().replace(/\s+/g, ' ').trim();
 
-    // Extract PO Date
-    const poDateMatch = text.match(/PO Date\s*:\s*([^\n]+)/i);
-    if (poDateMatch) data.poDate = poDateMatch[1].trim();
+    // PO Number: pola lebih luas
+    let poMatch = normalizedText.match(/(?:po\s*(?:number|no|#|num)\s*[:\-]?\s*([a-z0-9\-\/]{5,}))/i) ||
+                  normalizedText.match(/(?:po[0-9]{4,}|order\s*(?:no|#)\s*[:\-]?\s*([a-z0-9\-\/]{5,}))/i) ||
+                  normalizedText.match(/([pP][oO]\s*[0-9\-\/]{5,})/);
+    if (poMatch) {
+        data.poNumber = poMatch[1] ? poMatch[1].trim() : poMatch[0].trim();
+        console.log('✅ PO Number found:', data.poNumber);
+    }
 
-    // Extract Supplier (To: ...)
-    const supplierMatch = text.match(/To\s*:\s*([^\n]+)/i);
-    if (supplierMatch) data.supplier = supplierMatch[1].trim();
+    // PO Date: berbagai format tanggal
+    let dateMatch = normalizedText.match(/(?:date|tanggal)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i) ||
+                    normalizedText.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
+    if (dateMatch) {
+        data.poDate = dateMatch[1].trim();
+        console.log('✅ PO Date found:', data.poDate);
+    }
 
-    // Extract Description at the bottom
-    const descMatch = text.match(/Description\s*-\s*([^\n]+)/i);
-    if (descMatch) data.description = descMatch[1].trim();
+    // Supplier: berbagai pola
+    let suppMatch = normalizedText.match(/(?:to|kepada|supplier|vendor)[:\-]?\s*([a-z\s,]+?)(?:\n|$|qty|item|\d)/i);
+    if (suppMatch) {
+        data.supplier = suppMatch[1].trim();
+        console.log('✅ Supplier found:', data.supplier);
+    }
 
-    // Extract items from table
-    const lines = text.split('\n');
-    
+    // Description
+    let descMatch = normalizedText.match(/(?:description|deskripsi)[:\-]?\s*([^\n\r]+)/i);
+    if (descMatch) {
+        data.description = descMatch[1].trim();
+    }
+
+    // Items: pola tabel lebih fleksibel
+    const lines = text.split(/\n|\r\n/);
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+        let line = lines[i].trim();
         
-        // Match item lines with number at start
-        const itemMatch = line.match(/^(\d+)\s+([\w-]+)\s+(.+?)\s+(\d+)\s+([\d,.]+)\s+(\d+)\s+([\d,.]+)/);
+        // Skip header/footer lines
+        if (line.match(/total|subtotal|grand|tax|ppn/i) || line.length < 10) continue;
         
-        if (itemMatch) {
-            const [, no, itemCode, desc, qty] = itemMatch;
-            
+        // Pola 1: 1 ITEM001 Nama Barang 10
+        let itemMatch1 = line.match(/^(\d+[.\)]\s?)?\s*([a-z0-9\-]{3,})\s+(.+?)\s+(\d+(?:,\d+)?)$/i);
+        if (itemMatch1 && itemMatch1[2] && itemMatch1[4]) {
             data.items.push({
-                no: no.trim(),
-                item: itemCode.trim(),
-                namaBarang: desc.trim(),
-                quantity: qty.trim()
+                no: itemMatch1[1] || '',
+                item: itemMatch1[2].trim(),
+                namaBarang: itemMatch1[3].trim(),
+                quantity: itemMatch1[4].trim()
+            });
+            continue;
+        }
+        
+        // Pola 2: ITEM001 Nama Barang 10 pcs
+        let itemMatch2 = line.match(/^([a-z0-9\-]{3,})\s+(.+?)\s+(\d+(?:,\d+)?)/i);
+        if (itemMatch2 && itemMatch2[1] && itemMatch2[3]) {
+            data.items.push({
+                no: '',
+                item: itemMatch2[1].trim(),
+                namaBarang: itemMatch2[2].trim(),
+                quantity: itemMatch2[3].trim()
             });
         }
     }
 
+    console.log('📊 Parsed data:', {
+        poNumber: data.poNumber,
+        poDate: data.poDate,
+        supplier: data.supplier,
+        itemCount: data.items.length,
+        items: data.items.slice(0, 3) // Show first 3 items
+    });
+    
     return data;
 }
 
@@ -267,14 +358,15 @@ async function sendToGoogleSheets(poData) {
             mode: 'no-cors'
         });
 
-        // Mode no-cors tidak bisa baca response, tapi request tetap terkirim
+        console.log('✅ Data sent to Google Sheets:', rows.length, 'rows');
         return { success: true };
     } catch (error) {
+        console.error('❌ Google Sheets error:', error);
         throw new Error('Gagal mengirim ke Google Sheets: ' + error.message);
     }
 }
 
-// Process all files
+// Process all files (DIPERBAIKI: tidak error jika 0 items)
 async function processFiles() {
     if (selectedFiles.length === 0) {
         alert('❌ Pilih file PDF atau gambar terlebih dahulu');
@@ -294,7 +386,7 @@ async function processFiles() {
         try {
             // Update progress
             document.getElementById('progressText').textContent = 
-                `⏳ Processing ${i + 1}/${selectedFiles.length}: ${file.name}...`;
+                `⏳ Processing ${i + 1}/${selectedFiles.length}: ${file.name}`;
 
             let text = '';
             
@@ -309,20 +401,18 @@ async function processFiles() {
             
             const poData = parsePoData(text);
             
-            if (poData.items.length === 0) {
-                throw new Error('Tidak ada data item yang ditemukan. Pastikan format PO sesuai.');
-            }
-            
+            // Selalu kirim data, bahkan jika 0 items (kirim metadata saja)
             await sendToGoogleSheets(poData);
             
             results.push({
                 fileName: file.name,
-                status: 'success',
+                status: poData.items.length > 0 ? 'success' : 'partial',
                 poNumber: poData.poNumber || 'N/A',
                 itemCount: poData.items.length,
                 fileType: file.type.startsWith('image/') ? 'image' : 'pdf'
             });
         } catch (error) {
+            console.error('❌ Process failed:', error);
             results.push({
                 fileName: file.name,
                 status: 'error',
@@ -346,28 +436,31 @@ function displayResults(results) {
     
     results.forEach(result => {
         const resultItem = document.createElement('div');
-        resultItem.className = `result-item ${result.status === 'success' ? 'result-success' : 'result-error'}`;
+        let statusClass, icon, message;
         
-        const icon = result.status === 'success' 
-            ? '<svg class="result-icon result-icon-success" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>'
-            : '<svg class="result-icon result-icon-error" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+        if (result.status === 'success') {
+            statusClass = 'result-success';
+            icon = '<svg class="result-icon result-icon-success" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+            message = `✓ Berhasil! PO: ${result.poNumber} (${result.itemCount} items)`;
+        } else if (result.status === 'partial') {
+            statusClass = 'result-warning';
+            icon = '⚠️';
+            message = `⚠️ Metadata OK, tapi 0 items ditemukan: ${result.fileName}`;
+        } else {
+            statusClass = 'result-error';
+            icon = '<svg class="result-icon result-icon-error" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+            message = `✗ Error: ${result.error}`;
+        }
         
         const fileIcon = result.fileType === 'image' ? '🖼️' : '📄';
         
-        const message = result.status === 'success'
-            ? `✓ Berhasil! PO: ${result.poNumber} (${result.itemCount} items)`
-            : `✗ Error: ${result.error}`;
-        
-        const messageClass = result.status === 'success' 
-            ? 'result-message-success' 
-            : 'result-message-error';
-        
+        resultItem.className = `result-item ${statusClass}`;
         resultItem.innerHTML = `
             <div class="result-header">
-                ${icon}
+                <span class="result-icon-text">${icon}</span>
                 <div class="result-content">
-                    <p class="result-filename">${result.fileType ? fileIcon + ' ' : ''}${result.fileName}</p>
-                    <p class="result-message ${messageClass}">${message}</p>
+                    <p class="result-filename">${fileIcon} ${result.fileName}</p>
+                    <p class="result-message">${message}</p>
                 </div>
             </div>
         `;
@@ -376,7 +469,5 @@ function displayResults(results) {
     });
     
     resultsSection.style.display = 'block';
-    
-    // Scroll to results
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
