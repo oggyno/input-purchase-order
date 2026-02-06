@@ -243,6 +243,7 @@ async function extractTextFromImage(file) {
 }
 
 // Parse PO data (DIPERBAIKI: regex lebih fleksibel)
+// Parse PO data (SUPER DITERBAIKI untuk format PO Saberindo)
 function parsePoData(text) {
     console.log('🔍 Parsing text sample:', text.substring(0, 1000));
     
@@ -256,7 +257,7 @@ function parsePoData(text) {
 
     const normalizedText = text.toLowerCase().replace(/\s+/g, ' ').trim();
 
-    // PO Number: pola lebih luas
+    // PO Number - sudah OK
     let poMatch = normalizedText.match(/(?:po\s*(?:number|no|#|num)\s*[:\-]?\s*([a-z0-9\-\/]{5,}))/i) ||
                   normalizedText.match(/(?:po[0-9]{4,}|order\s*(?:no|#)\s*[:\-]?\s*([a-z0-9\-\/]{5,}))/i) ||
                   normalizedText.match(/([pP][oO]\s*[0-9\-\/]{5,})/);
@@ -265,65 +266,73 @@ function parsePoData(text) {
         console.log('✅ PO Number found:', data.poNumber);
     }
 
-    // PO Date: berbagai format tanggal
-    let dateMatch = normalizedText.match(/(?:date|tanggal)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i) ||
-                    normalizedText.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
+    // PO Date - tambah pola baru
+    let dateMatch = normalizedText.match(/(?:date|tanggal)\s*[:\-]?\s*(\d{1,2}\s*[a-z]{3}\s*\d{4}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i) ||
+                    normalizedText.match(/(\d{1,2}\s*[a-z]{3}\s*\d{4})/i);
     if (dateMatch) {
         data.poDate = dateMatch[1].trim();
         console.log('✅ PO Date found:', data.poDate);
     }
 
-    // Supplier: berbagai pola
-    let suppMatch = normalizedText.match(/(?:to|kepada|supplier|vendor)[:\-]?\s*([a-z\s,]+?)(?:\n|$|qty|item|\d)/i);
+    // Supplier - perbaiki capture grup
+    let suppMatch = normalizedText.match(/(?:to|kepada|supplier|vendor)\s*[:\-]?\s*([a-z\s,\/]+?)(?=\s*(?:fax|tel|cc|att|no\.|item|\d))/i);
     if (suppMatch) {
-        data.supplier = suppMatch[1].trim();
+        data.supplier = suppMatch[1].replace(/hp\..*$/i, '').trim();
         console.log('✅ Supplier found:', data.supplier);
     }
 
-    // Description
-    let descMatch = normalizedText.match(/(?:description|deskripsi)[:\-]?\s*([^\n\r]+)/i);
-    if (descMatch) {
-        data.description = descMatch[1].trim();
-    }
-
-    // Items: pola tabel lebih fleksibel
+    // Items - REGEX BARU khusus format tabel Anda!
     const lines = text.split(/\n|\r\n/);
+    let inTable = false;
+    
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
         
-        // Skip header/footer lines
-        if (line.match(/total|subtotal|grand|tax|ppn/i) || line.length < 10) continue;
-        
-        // Pola 1: 1 ITEM001 Nama Barang 10
-        let itemMatch1 = line.match(/^(\d+[.\)]\s?)?\s*([a-z0-9\-]{3,})\s+(.+?)\s+(\d+(?:,\d+)?)$/i);
-        if (itemMatch1 && itemMatch1[2] && itemMatch1[4]) {
-            data.items.push({
-                no: itemMatch1[1] || '',
-                item: itemMatch1[2].trim(),
-                namaBarang: itemMatch1[3].trim(),
-                quantity: itemMatch1[4].trim()
-            });
+        // Deteksi awal tabel (header)
+        if (line.match(/no\.\s*item\s*desc/i) || line.match(/no\.\s+item/i)) {
+            inTable = true;
+            console.log('📋 Table detected at line:', i);
             continue;
         }
         
-        // Pola 2: ITEM001 Nama Barang 10 pcs
-        let itemMatch2 = line.match(/^([a-z0-9\-]{3,})\s+(.+?)\s+(\d+(?:,\d+)?)/i);
-        if (itemMatch2 && itemMatch2[1] && itemMatch2[3]) {
+        // Skip jika bukan di tabel atau line kosong
+        if (!inTable || line.length < 10 || line.match(/total|subtotal|grand|requested/i)) {
+            continue;
+        }
+        
+        // **REGEX BARU untuk format: "1   2017001017   KAPUR BESI @PERLUSIN   4   25.000"**
+        // Pola: [no] [itemCode 8+ char] [description sampai qty] [qty angka]
+        let itemMatch = line.match(/^(\d+)\s+([a-z0-9]{7,})\s+(.+?)\s+(\d+(?:,\d+)?)\s*$/i);
+        
+        if (itemMatch) {
             data.items.push({
-                no: '',
-                item: itemMatch2[1].trim(),
-                namaBarang: itemMatch2[2].trim(),
-                quantity: itemMatch2[3].trim()
+                no: itemMatch[1].trim(),
+                item: itemMatch[2].trim(),
+                namaBarang: itemMatch[3].trim(),
+                quantity: itemMatch[4].trim()
+            });
+            console.log('✅ Item found:', itemMatch.slice(1));
+            continue;
+        }
+        
+        // Fallback pola sederhana: angka + code + qty
+        let fallbackMatch = line.match(/^(\d+)\s+([^\s]{4,})\s+(.+?)\s+(\d+)$/);
+        if (fallbackMatch) {
+            data.items.push({
+                no: fallbackMatch[1],
+                item: fallbackMatch[2].trim(),
+                namaBarang: fallbackMatch[3].trim(),
+                quantity: fallbackMatch[4]
             });
         }
     }
 
-    console.log('📊 Parsed data:', {
+    console.log('📊 FINAL Parsed data:', {
         poNumber: data.poNumber,
         poDate: data.poDate,
         supplier: data.supplier,
         itemCount: data.items.length,
-        items: data.items.slice(0, 3) // Show first 3 items
+        sampleItems: data.items.slice(0, 3)
     });
     
     return data;
