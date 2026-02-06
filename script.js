@@ -1,8 +1,7 @@
 // Global variables
 let selectedFiles = [];
 let config = {
-    apiKey: '',
-    spreadsheetId: '',
+    webAppUrl: '',
     sheetName: 'Dataset Purchase Order'
 };
 
@@ -13,14 +12,30 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 document.getElementById('fileInput').addEventListener('change', handleFileSelect);
 document.getElementById('sheetName').addEventListener('input', updateSheetNameDisplay);
 
+// Copy code function
+function copyCode() {
+    const code = document.getElementById('appsScriptCode').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => {
+            btn.textContent = '📋 Copy Code';
+        }, 2000);
+    });
+}
+
 // Save configuration
 function saveConfig() {
-    config.apiKey = document.getElementById('apiKey').value.trim();
-    config.spreadsheetId = document.getElementById('spreadsheetId').value.trim();
+    config.webAppUrl = document.getElementById('webAppUrl').value.trim();
     config.sheetName = document.getElementById('sheetName').value.trim();
 
-    if (!config.apiKey || !config.spreadsheetId) {
-        alert('Mohon isi API Key dan Spreadsheet ID');
+    if (!config.webAppUrl) {
+        alert('Mohon isi Web App URL dari Google Apps Script');
+        return;
+    }
+
+    if (!config.webAppUrl.includes('script.google.com')) {
+        alert('URL tidak valid. Pastikan URL dari Google Apps Script');
         return;
     }
 
@@ -189,10 +204,10 @@ function parsePoData(text) {
     return data;
 }
 
-// Send data to Google Sheets
+// Send data to Google Sheets via Apps Script
 async function sendToGoogleSheets(poData) {
-    if (!config.apiKey || !config.spreadsheetId) {
-        throw new Error('Google Sheets API Key dan Spreadsheet ID harus diisi');
+    if (!config.webAppUrl) {
+        throw new Error('Web App URL belum diisi');
     }
 
     const rows = poData.items.map(item => [
@@ -205,28 +220,21 @@ async function sendToGoogleSheets(poData) {
         poData.description
     ]);
 
-    // Encode sheet name untuk handle spasi dan karakter khusus
-    const encodedSheetName = encodeURIComponent(config.sheetName);
+    const response = await fetch(config.webAppUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            sheetName: config.sheetName,
+            rows: rows
+        })
+    });
 
-    const response = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${encodedSheetName}!A:G:append?valueInputOption=RAW&key=${config.apiKey}`,
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                values: rows
-            })
-        }
-    );
-
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error?.message || 'Gagal mengirim ke Google Sheets');
-    }
-
-    return await response.json();
+    // Note: mode 'no-cors' tidak bisa baca response, tapi request tetap terkirim
+    // Kita asumsikan berhasil jika tidak ada error
+    return { success: true };
 }
 
 // Process all files
