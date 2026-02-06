@@ -404,3 +404,96 @@ h3 {
         grid-column: span 1;
     }
 }
+
+/* Setup Guide */
+.setup-guide {
+    margin-top: 2rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+}
+
+.guide-step {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.guide-step:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.guide-step h4 {
+    color: #667eea;
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.guide-step p {
+    color: #4b5563;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.guide-step ol,
+.guide-step ul {
+    margin-left: 1.5rem;
+    color: #4b5563;
+    font-size: 0.875rem;
+    line-height: 1.7;
+}
+
+.guide-step ul {
+    list-style-type: disc;
+    margin-left: 2.5rem;
+}
+
+.guide-step li {
+    margin-bottom: 0.5rem;
+}
+
+.code-block {
+    position: relative;
+    background: #1e293b;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-top: 0.75rem;
+    overflow-x: auto;
+}
+
+.code-block pre {
+    color: #e2e8f0;
+    font-family: 'Courier New', monospace;
+    font-size: 0.813rem;
+    line-height: 1.6;
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.copy-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: #667eea;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.copy-btn:hover {
+    background: #5568d3;
+}
+
+code {
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+}
