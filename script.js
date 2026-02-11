@@ -234,8 +234,95 @@ function parsePoData(text) {
         console.log('📏 Table text length:', tableText.length);
     }
 
-    // Strategy 1: Try direct regex matching first (best for multi-page PDFs)
-    console.log('🔍 Strategy 1: Direct regex matching...');
+    // Strategy 1: Split and parse (better for complex descriptions)
+    console.log('🔍 Strategy 1: Split by pattern and parse...');
+    
+    // First, let's try to find individual item lines
+    // Look for pattern: starts with number, followed by item code
+    const itemLines = [];
+    const lines = tableText.split('\n');
+    
+    let currentLine = '';
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // Check if line starts with a number (potential item number)
+        if (/^\d+\s/.test(line)) {
+            // Save previous line if exists
+            if (currentLine) {
+                itemLines.push(currentLine);
+            }
+            currentLine = line;
+        } else if (currentLine && line) {
+            // Continuation of previous line
+            currentLine += ' ' + line;
+        }
+    }
+    // Don't forget last line
+    if (currentLine) {
+        itemLines.push(currentLine);
+    }
+    
+    console.log(`📝 Found ${itemLines.length} potential item lines`);
+    
+    // Now parse each line
+    let matchCount = 0;
+    for (let i = 0; i < itemLines.length; i++) {
+        const line = itemLines[i];
+        
+        // Split by 3+ spaces
+        const parts = line.split(/\s{3,}/);
+        
+        if (parts.length < 7) {
+            console.log(`   ⚠️ Line ${i}: Not enough parts (${parts.length}): "${line.substring(0, 60)}..."`);
+            continue;
+        }
+        
+        // Expected format: [no, itemCode, description, qty, unitPrice, disc, amount]
+        const no = parts[0].trim();
+        const itemCode = parts[1].trim();
+        const desc = parts[2].trim();
+        const qty = parts[3].trim();
+        const unitPrice = parts[4].trim();
+        const disc = parts[5].trim();
+        const amount = parts[6].trim();
+        
+        console.log(`   🔍 Line ${i}: no="${no}" | item="${itemCode}" | desc="${desc.substring(0, 30)}..." | qty="${qty}" | price="${unitPrice}" | disc="${disc}"`);
+        
+        // Validation
+        const isValidNo = /^\d+$/.test(no);
+        const isValidItem = itemCode && itemCode.length >= 2;
+        const isValidDesc = desc && desc.length >= 3;
+        const isValidQty = /^\d+$/.test(qty) && parseInt(qty) > 0;
+        const isValidPrice = /^[\d,.]+$/.test(unitPrice);
+        const isValidDisc = /^[\d,.]+$/.test(disc);
+        
+        if (!isValidNo || !isValidItem || !isValidDesc || !isValidQty || !isValidPrice || !isValidDisc) {
+            console.log(`      ❌ Validation failed: no=${isValidNo}, item=${isValidItem}, desc=${isValidDesc}, qty=${isValidQty}, price=${isValidPrice}, disc=${isValidDisc}`);
+            continue;
+        }
+        
+        console.log(`      ✅ Valid item ${matchCount + 1}: ${no} | ${itemCode} | ${desc.substring(0, 40)} | ${qty}`);
+        
+        data.items.push({
+            no: no,
+            item: itemCode,
+            namaBarang: desc,
+            quantity: qty
+        });
+        matchCount++;
+    }
+    
+    console.log(`📊 Split method found ${matchCount} items`);
+    
+    // If split method worked, return early
+    if (matchCount > 0) {
+        console.log('✅ Using split method results');
+        return data;
+    }
+    
+    // Strategy 2: Try direct regex matching (fallback)
+    console.log('🔍 Strategy 2: Direct regex matching (fallback)...');
     
     // Pattern explanation:
     // Format: No | Item | Description | Qty | Unit Price | Disc | Amount
