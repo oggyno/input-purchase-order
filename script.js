@@ -93,6 +93,9 @@ function updateSheetNameDisplay() {
     if (displayElement) {
         displayElement.textContent = sheetName;
     }
+    document.querySelectorAll('.sheet-name-ref').forEach(el => {
+        el.textContent = sheetName;
+    });
 }
 
 // Handle file selection
@@ -134,9 +137,9 @@ function displayFileList() {
     });
 }
 
-// Extract text from PDF (DIPERBAIKI: fallback OCR jika text kosong)
+// Extract text from PDF
 async function extractTextFromPDF(file) {
-    return new Promise(async (resolve, reject) => {
+    return new Promise((resolve, reject) => {
         const reader = new FileReader();
         
         reader.onload = async (e) => {
@@ -145,7 +148,6 @@ async function extractTextFromPDF(file) {
                 const pdf = await pdfjsLib.getDocument(typedArray).promise;
                 let fullText = '';
                 
-                // Coba extract text native dulu
                 for (let i = 1; i <= pdf.numPages; i++) {
                     const page = await pdf.getPage(i);
                     const textContent = await page.getTextContent();
@@ -153,68 +155,15 @@ async function extractTextFromPDF(file) {
                     fullText += pageText + '\n';
                 }
                 
-                console.log('✅ PDF native text extracted:', fullText.substring(0, 500) + '...');
-                
-                // Jika text terlalu pendek, coba OCR
-                if (fullText.trim().length < 100) {
-                    console.log('⚠️ Native text terlalu pendek, mencoba OCR...');
-                    const ocrText = await ocrPdfPages(typedArray);
-                    console.log('✅ PDF OCR text:', ocrText.substring(0, 500) + '...');
-                    resolve(ocrText);
-                } else {
-                    resolve(fullText);
-                }
+                resolve(fullText);
             } catch (error) {
-                console.error('❌ Native text extraction failed:', error);
-                // Fallback: OCR via canvas render
-                try {
-                    const ocrText = await ocrPdfPages(typedArray);
-                    console.log('✅ PDF OCR fallback success:', ocrText.substring(0, 500) + '...');
-                    resolve(ocrText);
-                } catch (ocrError) {
-                    console.error('❌ OCR failed:', ocrError);
-                    reject(ocrError);
-                }
+                reject(error);
             }
         };
         
         reader.onerror = reject;
         reader.readAsArrayBuffer(file);
     });
-}
-
-// Fungsi baru: OCR PDF pages via canvas + Tesseract
-async function ocrPdfPages(arrayBuffer) {
-    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-    let fullText = '';
-    
-    for (let i = 1; i <= pdf.numPages; i++) {
-        console.log(`OCR page ${i}/${pdf.numPages}...`);
-        
-        const page = await pdf.getPage(i);
-        const scale = 2.0; // Tinggi untuk akurasi OCR
-        const viewport = page.getViewport({ scale });
-        
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-        
-        const renderContext = {
-            canvasContext: context,
-            viewport: viewport
-        };
-        
-        await page.render(renderContext).promise;
-        
-        const worker = await Tesseract.createWorker('eng+ind'); // Support English + Indonesia
-        const { data: { text } } = await worker.recognize(canvas);
-        await worker.terminate();
-        
-        fullText += text + '\n--- PAGE ' + i + ' ---\n';
-    }
-    
-    return fullText;
 }
 
 // Extract text from image using OCR
@@ -224,15 +173,12 @@ async function extractTextFromImage(file) {
         
         reader.onload = async (e) => {
             try {
-                console.log('OCR image:', file.name);
-                const worker = await Tesseract.createWorker('eng+ind');
+                const worker = await Tesseract.createWorker('eng');
                 const { data: { text } } = await worker.recognize(e.target.result);
                 await worker.terminate();
                 
-                console.log('✅ Image OCR text:', text.substring(0, 500) + '...');
                 resolve(text);
             } catch (error) {
-                console.error('❌ Image OCR failed:', error);
                 reject(error);
             }
         };
@@ -242,11 +188,8 @@ async function extractTextFromImage(file) {
     });
 }
 
-// Parse PO data (DIPERBAIKI: regex lebih fleksibel)
-// Parse PO data (SUPER DITERBAIKI untuk format PO Saberindo)
+// Parse PO data from text
 function parsePoData(text) {
-    console.log('🔍 Parsing text sample:', text.substring(0, 1000));
-    
     const data = {
         poNumber: '',
         poDate: '',
@@ -255,86 +198,193 @@ function parsePoData(text) {
         description: ''
     };
 
-    const normalizedText = text.toLowerCase().replace(/\s+/g, ' ').trim();
+    // Extract PO Number
+    const poNumberMatch = text.match(/PO Number\s*:\s*(\S+)/i);
+    if (poNumberMatch) data.poNumber = poNumberMatch[1].trim();
 
-    // PO Number - sudah OK
-    let poMatch = normalizedText.match(/(?:po\s*(?:number|no|#|num)\s*[:\-]?\s*([a-z0-9\-\/]{5,}))/i) ||
-                  normalizedText.match(/(?:po[0-9]{4,}|order\s*(?:no|#)\s*[:\-]?\s*([a-z0-9\-\/]{5,}))/i) ||
-                  normalizedText.match(/([pP][oO]\s*[0-9\-\/]{5,})/);
-    if (poMatch) {
-        data.poNumber = poMatch[1] ? poMatch[1].trim() : poMatch[0].trim();
-        console.log('✅ PO Number found:', data.poNumber);
+    // Extract PO Date (fix: only get the date, not everything after)
+    const poDateMatch = text.match(/PO Date\s*:\s*([^\n]+?)(?:\s{2,}|$)/i);
+    if (poDateMatch) data.poDate = poDateMatch[1].trim();
+
+    // Extract Supplier - get line after "To" but before next field
+    const supplierMatch = text.match(/:\s*([A-Z][A-Z\s,\.]+(?:TOKO|PT|CV)?)\s+We confirm/i);
+    if (supplierMatch) {
+        data.supplier = supplierMatch[1].trim();
+    } else {
+        // Fallback pattern
+        const fallbackMatch = text.match(/To\s+(?:Att|CC|Fax|Tel)[\s\S]{0,200}:\s*([A-Z][A-Z\s,\.]+)/i);
+        if (fallbackMatch) data.supplier = fallbackMatch[1].trim();
     }
 
-    // PO Date - tambah pola baru
-    let dateMatch = normalizedText.match(/(?:date|tanggal)\s*[:\-]?\s*(\d{1,2}\s*[a-z]{3}\s*\d{4}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i) ||
-                    normalizedText.match(/(\d{1,2}\s*[a-z]{3}\s*\d{4})/i);
-    if (dateMatch) {
-        data.poDate = dateMatch[1].trim();
-        console.log('✅ PO Date found:', data.poDate);
+    // Extract Description at the bottom
+    const descMatch = text.match(/Description\s*-\s*([^\n]+)/i);
+    if (descMatch) data.description = descMatch[1].trim();
+
+    // Find the table section
+    const tableStartMatch = text.match(/No\.\s+Item\s+Description\s+Qty/i);
+    const tableEndMatch = text.match(/Requested By/i);
+    
+    let tableText = text;
+    if (tableStartMatch && tableEndMatch) {
+        const startIdx = text.indexOf(tableStartMatch[0]) + tableStartMatch[0].length;
+        const endIdx = text.indexOf(tableEndMatch[0]);
+        tableText = text.substring(startIdx, endIdx);
+        
+        console.log('📋 Table text extracted (first 500 chars):', tableText.substring(0, 500));
+        console.log('📏 Table text length:', tableText.length);
     }
 
-    // Supplier - perbaiki capture grup
-    let suppMatch = normalizedText.match(/(?:to|kepada|supplier|vendor)\s*[:\-]?\s*([a-z\s,\/]+?)(?=\s*(?:fax|tel|cc|att|no\.|item|\d))/i);
-    if (suppMatch) {
-        data.supplier = suppMatch[1].replace(/hp\..*$/i, '').trim();
-        console.log('✅ Supplier found:', data.supplier);
+    // Strategy 1: Try direct regex matching first (best for multi-page PDFs)
+    console.log('🔍 Strategy 1: Direct regex matching...');
+    
+    // Pattern explanation:
+    // Format: No | Item | Description | Qty | Unit Price | Disc | Amount
+    // Example: 1   11MGPT4PP   MATA GERINDA POTONG 4", BRAND : "WD" (IN PCS)   5   3.378,39   0   16.891,95
+    
+    // We need to capture until we hit: qty + unit_price + disc (usually 0) + amount
+    // Pattern: (\d+)\s{3,}(item)\s{3,}(desc)\s{3,}(\d+)\s{3,}[\d,.]+\s{3,}[\d,.]+\s{3,}[\d,.]+
+    //          no           itemCode      description    qty      unit_price   disc      amount
+    
+    const directPattern = /(\d+)\s{3,}([\w-]+)\s{3,}(.+?)\s{3,}(\d+)\s{3,}[\d,.]+\s{3,}[\d,.]+\s{3,}[\d,.]+/g;
+    let match;
+    let matchCount = 0;
+    
+    while ((match = directPattern.exec(tableText)) !== null) {
+        const [fullMatch, no, itemCode, desc, qty] = match;
+        
+        console.log(`   🔍 Raw match: "${fullMatch.substring(0, 100)}..."`);
+        console.log(`      Parsed: no="${no}" | item="${itemCode}" | desc="${desc.substring(0, 40)}..." | qty="${qty}"`);
+        
+        // Clean description - remove excessive whitespace
+        const cleanDesc = desc.trim().replace(/\s{2,}/g, ' ');
+        
+        // Validation
+        const isValidNo = /^\d+$/.test(no);
+        const isValidItem = itemCode && itemCode.length >= 2;
+        const isValidDesc = cleanDesc && cleanDesc.length >= 3;
+        const isValidQty = /^\d+$/.test(qty) && parseInt(qty) > 0; // Qty must be > 0
+        
+        if (!isValidNo || !isValidItem || !isValidDesc || !isValidQty) {
+            console.log(`      ❌ Validation failed: no=${isValidNo}, item=${isValidItem}, desc=${isValidDesc}, qty=${isValidQty} (value: ${qty})`);
+            continue;
+        }
+        
+        console.log(`      ✅ Valid item ${matchCount + 1}: ${no} | ${itemCode} | ${cleanDesc.substring(0, 40)} | ${qty}`);
+        
+        data.items.push({
+            no: no,
+            item: itemCode,
+            namaBarang: cleanDesc,
+            quantity: qty
+        });
+        matchCount++;
+    }
+    
+    console.log(`📊 Direct regex found ${matchCount} items`);
+    
+    // If direct matching worked, return early
+    if (matchCount > 0) {
+        console.log('✅ Using direct regex results');
+        return data;
     }
 
-    // Items - REGEX BARU khusus format tabel Anda!
-    const lines = text.split(/\n|\r\n/);
-    let inTable = false;
+    // Strategy 2: Split by newlines
+    console.log('🔍 Strategy 2: Trying newline split...');
+    let lines = tableText.split('\n');
+    
+    // If no newlines, try other separators
+    if (lines.length === 1) {
+        console.log('⚠️ No \\n found, trying \\r\\n...');
+        lines = tableText.split('\r\n');
+    }
+    if (lines.length === 1) {
+        console.log('⚠️ No \\r\\n found, trying manual parsing...');
+        // If still one line, try to find patterns directly in the text
+        const itemPattern = /(\d+)\s{2,}(\S+)\s{2,}(.+?)\s{2,}(\d+)\s{2,}[\d,.]+\s{2,}[\d,.]+\s{2,}[\d,.]+/g;
+        let match;
+        while ((match = itemPattern.exec(tableText)) !== null) {
+            const [, no, itemCode, desc, qty] = match;
+            console.log(`   ✅ Direct match: ${no} | ${itemCode} | ${desc} | ${qty}`);
+            data.items.push({
+                no: no.trim(),
+                item: itemCode.trim(),
+                namaBarang: desc.trim(),
+                quantity: qty.trim()
+            });
+        }
+        return data; // Return early if we used direct matching
+    }
+    
+    console.log(`📝 Split into ${lines.length} lines`);
     
     for (let i = 0; i < lines.length; i++) {
-        let line = lines[i].trim();
+        const line = lines[i].trim();
         
-        // Deteksi awal tabel (header)
-        if (line.match(/no\.\s*item\s*desc/i) || line.match(/no\.\s+item/i)) {
-            inTable = true;
-            console.log('📋 Table detected at line:', i);
+        // Skip empty lines
+        if (!line) {
+            console.log(`🔍 Line ${i}: [empty, skipped]`);
             continue;
         }
         
-        // Skip jika bukan di tabel atau line kosong
-        if (!inTable || line.length < 10 || line.match(/total|subtotal|grand|requested/i)) {
+        // Skip header and footer lines
+        if (line.match(/^(No\.|Item|Description|Qty|Unit|Price|Disc|Amount|Sub Total|VAT|Total|Requested|Authorized|Say|Catatan)/i)) {
+            console.log(`🔍 Line ${i}: [header/footer, skipped] "${line.substring(0, 50)}..."`);
             continue;
         }
         
-        // **REGEX BARU untuk format: "1   2017001017   KAPUR BESI @PERLUSIN   4   25.000"**
-        // Pola: [no] [itemCode 8+ char] [description sampai qty] [qty angka]
-        let itemMatch = line.match(/^(\d+)\s+([a-z0-9]{7,})\s+(.+?)\s+(\d+(?:,\d+)?)\s*$/i);
+        console.log(`🔍 Parsing line ${i}: "${line}"`);
         
-        if (itemMatch) {
+        // Method 1: Split by 2 or more spaces
+        const parts = line.split(/\s{2,}/);
+        console.log('   Parts:', parts);
+        
+        if (parts.length >= 4) {
+            const firstPart = parts[0].trim();
+            
+            // Check if first part is a single digit (item number)
+            if (/^\d+$/.test(firstPart)) {
+                const no = firstPart;
+                const itemCode = parts[1] ? parts[1].trim() : '';
+                const desc = parts[2] ? parts[2].trim() : '';
+                const qty = parts[3] ? parts[3].trim() : '';
+                
+                // Validate quantity is a number
+                if (no && itemCode && desc && /^\d+$/.test(qty)) {
+                    console.log(`   ✅ Found item: ${no} | ${itemCode} | ${desc} | ${qty}`);
+                    data.items.push({
+                        no: no,
+                        item: itemCode,
+                        namaBarang: desc,
+                        quantity: qty
+                    });
+                    continue;
+                } else {
+                    console.log(`   ❌ Validation failed: qty="${qty}" is not a number`);
+                }
+            } else {
+                console.log(`   ⚠️ First part "${firstPart}" is not a number`);
+            }
+        } else {
+            console.log(`   ⚠️ Not enough parts: ${parts.length}`);
+        }
+        
+        // Method 2: Regex pattern - very specific to this format
+        // Format: "1   2017001017   KAPUR BESI @PERLUSIN   4   25.000   0   100.000"
+        const match = line.match(/^(\d+)\s+(\S+)\s+(.+?)\s+(\d+)\s+[\d,.]+/);
+        if (match) {
+            const [, no, itemCode, desc, qty] = match;
+            console.log(`   ✅ Regex matched: ${no} | ${itemCode} | ${desc} | ${qty}`);
             data.items.push({
-                no: itemMatch[1].trim(),
-                item: itemMatch[2].trim(),
-                namaBarang: itemMatch[3].trim(),
-                quantity: itemMatch[4].trim()
+                no: no.trim(),
+                item: itemCode.trim(),
+                namaBarang: desc.trim(),
+                quantity: qty.trim()
             });
-            console.log('✅ Item found:', itemMatch.slice(1));
-            continue;
-        }
-        
-        // Fallback pola sederhana: angka + code + qty
-        let fallbackMatch = line.match(/^(\d+)\s+([^\s]{4,})\s+(.+?)\s+(\d+)$/);
-        if (fallbackMatch) {
-            data.items.push({
-                no: fallbackMatch[1],
-                item: fallbackMatch[2].trim(),
-                namaBarang: fallbackMatch[3].trim(),
-                quantity: fallbackMatch[4]
-            });
+        } else {
+            console.log(`   ❌ Regex didn't match`);
         }
     }
 
-    console.log('📊 FINAL Parsed data:', {
-        poNumber: data.poNumber,
-        poDate: data.poDate,
-        supplier: data.supplier,
-        itemCount: data.items.length,
-        sampleItems: data.items.slice(0, 3)
-    });
-    
     return data;
 }
 
@@ -367,15 +417,14 @@ async function sendToGoogleSheets(poData) {
             mode: 'no-cors'
         });
 
-        console.log('✅ Data sent to Google Sheets:', rows.length, 'rows');
+        // Mode no-cors tidak bisa baca response, tapi request tetap terkirim
         return { success: true };
     } catch (error) {
-        console.error('❌ Google Sheets error:', error);
         throw new Error('Gagal mengirim ke Google Sheets: ' + error.message);
     }
 }
 
-// Process all files (DIPERBAIKI: tidak error jika 0 items)
+// Process all files
 async function processFiles() {
     if (selectedFiles.length === 0) {
         alert('❌ Pilih file PDF atau gambar terlebih dahulu');
@@ -395,7 +444,7 @@ async function processFiles() {
         try {
             // Update progress
             document.getElementById('progressText').textContent = 
-                `⏳ Processing ${i + 1}/${selectedFiles.length}: ${file.name}`;
+                `⏳ Processing ${i + 1}/${selectedFiles.length}: ${file.name}...`;
 
             let text = '';
             
@@ -410,18 +459,41 @@ async function processFiles() {
             
             const poData = parsePoData(text);
             
-            // Selalu kirim data, bahkan jika 0 items (kirim metadata saja)
+            // Debug: Log extracted data
+            console.log('📊 Extracted PO Data:', {
+                poNumber: poData.poNumber,
+                poDate: poData.poDate,
+                supplier: poData.supplier,
+                itemCount: poData.items.length,
+                description: poData.description,
+                items: poData.items
+            });
+            
+            if (poData.items.length === 0) {
+                console.error('❌ No items found.');
+                console.log('📄 Full text length:', text.length);
+                console.log('📄 Text preview (first 1000 chars):', text.substring(0, 1000));
+                console.log('📄 Text preview (chars 1000-2000):', text.substring(1000, 2000));
+                
+                // Try to show table section if exists
+                const tableMatch = text.match(/No\.?\s+Item[\s\S]{0,500}/i);
+                if (tableMatch) {
+                    console.log('📋 Table section found:', tableMatch[0]);
+                }
+                
+                throw new Error('Tidak ada data item yang ditemukan. Cek Console (F12) untuk detail.');
+            }
+            
             await sendToGoogleSheets(poData);
             
             results.push({
                 fileName: file.name,
-                status: poData.items.length > 0 ? 'success' : 'partial',
+                status: 'success',
                 poNumber: poData.poNumber || 'N/A',
                 itemCount: poData.items.length,
                 fileType: file.type.startsWith('image/') ? 'image' : 'pdf'
             });
         } catch (error) {
-            console.error('❌ Process failed:', error);
             results.push({
                 fileName: file.name,
                 status: 'error',
@@ -445,31 +517,28 @@ function displayResults(results) {
     
     results.forEach(result => {
         const resultItem = document.createElement('div');
-        let statusClass, icon, message;
+        resultItem.className = `result-item ${result.status === 'success' ? 'result-success' : 'result-error'}`;
         
-        if (result.status === 'success') {
-            statusClass = 'result-success';
-            icon = '<svg class="result-icon result-icon-success" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
-            message = `✓ Berhasil! PO: ${result.poNumber} (${result.itemCount} items)`;
-        } else if (result.status === 'partial') {
-            statusClass = 'result-warning';
-            icon = '⚠️';
-            message = `⚠️ Metadata OK, tapi 0 items ditemukan: ${result.fileName}`;
-        } else {
-            statusClass = 'result-error';
-            icon = '<svg class="result-icon result-icon-error" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
-            message = `✗ Error: ${result.error}`;
-        }
+        const icon = result.status === 'success' 
+            ? '<svg class="result-icon result-icon-success" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>'
+            : '<svg class="result-icon result-icon-error" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
         
         const fileIcon = result.fileType === 'image' ? '🖼️' : '📄';
         
-        resultItem.className = `result-item ${statusClass}`;
+        const message = result.status === 'success'
+            ? `✓ Berhasil! PO: ${result.poNumber} (${result.itemCount} items)`
+            : `✗ Error: ${result.error}`;
+        
+        const messageClass = result.status === 'success' 
+            ? 'result-message-success' 
+            : 'result-message-error';
+        
         resultItem.innerHTML = `
             <div class="result-header">
-                <span class="result-icon-text">${icon}</span>
+                ${icon}
                 <div class="result-content">
-                    <p class="result-filename">${fileIcon} ${result.fileName}</p>
-                    <p class="result-message">${message}</p>
+                    <p class="result-filename">${result.fileType ? fileIcon + ' ' : ''}${result.fileName}</p>
+                    <p class="result-message ${messageClass}">${message}</p>
                 </div>
             </div>
         `;
@@ -478,5 +547,7 @@ function displayResults(results) {
     });
     
     resultsSection.style.display = 'block';
+    
+    // Scroll to results
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
