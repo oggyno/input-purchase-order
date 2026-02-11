@@ -234,75 +234,42 @@ function parsePoData(text) {
         console.log('📏 Table text length:', tableText.length);
     }
 
-    // Strategy 1: Split and parse (better for complex descriptions)
-    console.log('🔍 Strategy 1: Split by pattern and parse...');
+    // Strategy: Find all item patterns directly in the full table text
+    // Pattern matches: No + ItemCode + Description + Qty + UnitPrice + Disc + Amount
     
-    // First, let's try to find individual item lines
-    // Look for pattern: starts with number, followed by item code
-    const itemLines = [];
-    const lines = tableText.split('\n');
+    console.log('🔍 Parsing strategy: Direct pattern matching with proper column detection...');
     
-    let currentLine = '';
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        
-        // Check if line starts with a number (potential item number)
-        if (/^\d+\s/.test(line)) {
-            // Save previous line if exists
-            if (currentLine) {
-                itemLines.push(currentLine);
-            }
-            currentLine = line;
-        } else if (currentLine && line) {
-            // Continuation of previous line
-            currentLine += ' ' + line;
-        }
-    }
-    // Don't forget last line
-    if (currentLine) {
-        itemLines.push(currentLine);
-    }
+    // Use a robust pattern that captures all 7 columns
+    // Format: "17   2017001315   MAGNALUX PENETRANT 1 SET (CLEANER - DEVELOPER -  PENETRANT)  3   195.000   0   585.000"
     
-    console.log(`📝 Found ${itemLines.length} potential item lines`);
+    const itemPattern = /(\d+)\s{3,}([\w-]+)\s{3,}(.+?)\s{3,}(\d+)\s{3,}([\d,.]+)\s{3,}([\d,.]+)\s{3,}([\d,.]+)/g;
     
-    // Now parse each line
-    let matchCount = 0;
-    for (let i = 0; i < itemLines.length; i++) {
-        const line = itemLines[i];
+    let match;
+    let itemCount = 0;
+    
+    while ((match = itemPattern.exec(tableText)) !== null) {
+        const [fullMatch, no, itemCode, rawDesc, qty, unitPrice, disc, amount] = match;
         
-        // Split by 3+ spaces
-        const parts = line.split(/\s{3,}/);
+        // Clean description - remove excessive spaces and newlines
+        const desc = rawDesc.replace(/\s+/g, ' ').trim();
         
-        if (parts.length < 7) {
-            console.log(`   ⚠️ Line ${i}: Not enough parts (${parts.length}): "${line.substring(0, 60)}..."`);
-            continue;
-        }
-        
-        // Expected format: [no, itemCode, description, qty, unitPrice, disc, amount]
-        const no = parts[0].trim();
-        const itemCode = parts[1].trim();
-        const desc = parts[2].trim();
-        const qty = parts[3].trim();
-        const unitPrice = parts[4].trim();
-        const disc = parts[5].trim();
-        const amount = parts[6].trim();
-        
-        console.log(`   🔍 Line ${i}: no="${no}" | item="${itemCode}" | desc="${desc.substring(0, 30)}..." | qty="${qty}" | price="${unitPrice}" | disc="${disc}"`);
+        console.log(`   🔍 Item ${itemCount + 1}: no="${no}" | item="${itemCode}" | desc="${desc.substring(0, 40)}..." | qty="${qty}"`);
         
         // Validation
-        const isValidNo = /^\d+$/.test(no);
-        const isValidItem = itemCode && itemCode.length >= 2;
-        const isValidDesc = desc && desc.length >= 3;
-        const isValidQty = /^\d+$/.test(qty) && parseInt(qty) > 0;
+        const isValidNo = /^\d+$/.test(no) && parseInt(no) >= 1 && parseInt(no) <= 100;
+        const isValidItem = itemCode && itemCode.length >= 2 && /^[\w-]+$/.test(itemCode);
+        const isValidDesc = desc && desc.length >= 3 && desc.length < 500;
+        const isValidQty = /^\d+$/.test(qty) && parseInt(qty) > 0 && parseInt(qty) < 10000;
         const isValidPrice = /^[\d,.]+$/.test(unitPrice);
         const isValidDisc = /^[\d,.]+$/.test(disc);
+        const isValidAmount = /^[\d,.]+$/.test(amount);
         
-        if (!isValidNo || !isValidItem || !isValidDesc || !isValidQty || !isValidPrice || !isValidDisc) {
-            console.log(`      ❌ Validation failed: no=${isValidNo}, item=${isValidItem}, desc=${isValidDesc}, qty=${isValidQty}, price=${isValidPrice}, disc=${isValidDisc}`);
+        if (!isValidNo || !isValidItem || !isValidDesc || !isValidQty || !isValidPrice || !isValidDisc || !isValidAmount) {
+            console.log(`      ❌ Skipped: no=${isValidNo}, item=${isValidItem}, desc=${isValidDesc}, qty=${isValidQty}, price=${isValidPrice}`);
             continue;
         }
         
-        console.log(`      ✅ Valid item ${matchCount + 1}: ${no} | ${itemCode} | ${desc.substring(0, 40)} | ${qty}`);
+        console.log(`      ✅ Valid: ${no} | ${itemCode} | ${qty}`);
         
         data.items.push({
             no: no,
@@ -310,168 +277,19 @@ function parsePoData(text) {
             namaBarang: desc,
             quantity: qty
         });
-        matchCount++;
+        itemCount++;
     }
     
-    console.log(`📊 Split method found ${matchCount} items`);
+    console.log(`📊 Found ${itemCount} valid items`);
     
-    // If split method worked, return early
-    if (matchCount > 0) {
-        console.log('✅ Using split method results');
-        return data;
-    }
-    
-    // Strategy 2: Try direct regex matching (fallback)
-    console.log('🔍 Strategy 2: Direct regex matching (fallback)...');
-    
-    // Pattern explanation:
-    // Format: No | Item | Description | Qty | Unit Price | Disc | Amount
-    // Example: 1   11MGPT4PP   MATA GERINDA POTONG 4", BRAND : "WD" (IN PCS)   5   3.378,39   0   16.891,95
-    
-    // We need to capture until we hit: qty + unit_price + disc (usually 0) + amount
-    // Pattern: (\d+)\s{3,}(item)\s{3,}(desc)\s{3,}(\d+)\s{3,}[\d,.]+\s{3,}[\d,.]+\s{3,}[\d,.]+
-    //          no           itemCode      description    qty      unit_price   disc      amount
-    
-    const directPattern = /(\d+)\s{3,}([\w-]+)\s{3,}(.+?)\s{3,}(\d+)\s{3,}[\d,.]+\s{3,}[\d,.]+\s{3,}[\d,.]+/g;
-    let match;
-    let matchCount = 0;
-    
-    while ((match = directPattern.exec(tableText)) !== null) {
-        const [fullMatch, no, itemCode, desc, qty] = match;
-        
-        console.log(`   🔍 Raw match: "${fullMatch.substring(0, 100)}..."`);
-        console.log(`      Parsed: no="${no}" | item="${itemCode}" | desc="${desc.substring(0, 40)}..." | qty="${qty}"`);
-        
-        // Clean description - remove excessive whitespace
-        const cleanDesc = desc.trim().replace(/\s{2,}/g, ' ');
-        
-        // Validation
-        const isValidNo = /^\d+$/.test(no);
-        const isValidItem = itemCode && itemCode.length >= 2;
-        const isValidDesc = cleanDesc && cleanDesc.length >= 3;
-        const isValidQty = /^\d+$/.test(qty) && parseInt(qty) > 0; // Qty must be > 0
-        
-        if (!isValidNo || !isValidItem || !isValidDesc || !isValidQty) {
-            console.log(`      ❌ Validation failed: no=${isValidNo}, item=${isValidItem}, desc=${isValidDesc}, qty=${isValidQty} (value: ${qty})`);
-            continue;
-        }
-        
-        console.log(`      ✅ Valid item ${matchCount + 1}: ${no} | ${itemCode} | ${cleanDesc.substring(0, 40)} | ${qty}`);
-        
-        data.items.push({
-            no: no,
-            item: itemCode,
-            namaBarang: cleanDesc,
-            quantity: qty
-        });
-        matchCount++;
-    }
-    
-    console.log(`📊 Direct regex found ${matchCount} items`);
-    
-    // If direct matching worked, return early
-    if (matchCount > 0) {
-        console.log('✅ Using direct regex results');
+    if (itemCount > 0) {
+        console.log('✅ Parsing complete');
         return data;
     }
 
-    // Strategy 2: Split by newlines
-    console.log('🔍 Strategy 2: Trying newline split...');
-    let lines = tableText.split('\n');
+    // Fallback: If no items found
+    console.log('⚠️ No items found with direct pattern.');
     
-    // If no newlines, try other separators
-    if (lines.length === 1) {
-        console.log('⚠️ No \\n found, trying \\r\\n...');
-        lines = tableText.split('\r\n');
-    }
-    if (lines.length === 1) {
-        console.log('⚠️ No \\r\\n found, trying manual parsing...');
-        // If still one line, try to find patterns directly in the text
-        const itemPattern = /(\d+)\s{2,}(\S+)\s{2,}(.+?)\s{2,}(\d+)\s{2,}[\d,.]+\s{2,}[\d,.]+\s{2,}[\d,.]+/g;
-        let match;
-        while ((match = itemPattern.exec(tableText)) !== null) {
-            const [, no, itemCode, desc, qty] = match;
-            console.log(`   ✅ Direct match: ${no} | ${itemCode} | ${desc} | ${qty}`);
-            data.items.push({
-                no: no.trim(),
-                item: itemCode.trim(),
-                namaBarang: desc.trim(),
-                quantity: qty.trim()
-            });
-        }
-        return data; // Return early if we used direct matching
-    }
-    
-    console.log(`📝 Split into ${lines.length} lines`);
-    
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        
-        // Skip empty lines
-        if (!line) {
-            console.log(`🔍 Line ${i}: [empty, skipped]`);
-            continue;
-        }
-        
-        // Skip header and footer lines
-        if (line.match(/^(No\.|Item|Description|Qty|Unit|Price|Disc|Amount|Sub Total|VAT|Total|Requested|Authorized|Say|Catatan)/i)) {
-            console.log(`🔍 Line ${i}: [header/footer, skipped] "${line.substring(0, 50)}..."`);
-            continue;
-        }
-        
-        console.log(`🔍 Parsing line ${i}: "${line}"`);
-        
-        // Method 1: Split by 2 or more spaces
-        const parts = line.split(/\s{2,}/);
-        console.log('   Parts:', parts);
-        
-        if (parts.length >= 4) {
-            const firstPart = parts[0].trim();
-            
-            // Check if first part is a single digit (item number)
-            if (/^\d+$/.test(firstPart)) {
-                const no = firstPart;
-                const itemCode = parts[1] ? parts[1].trim() : '';
-                const desc = parts[2] ? parts[2].trim() : '';
-                const qty = parts[3] ? parts[3].trim() : '';
-                
-                // Validate quantity is a number
-                if (no && itemCode && desc && /^\d+$/.test(qty)) {
-                    console.log(`   ✅ Found item: ${no} | ${itemCode} | ${desc} | ${qty}`);
-                    data.items.push({
-                        no: no,
-                        item: itemCode,
-                        namaBarang: desc,
-                        quantity: qty
-                    });
-                    continue;
-                } else {
-                    console.log(`   ❌ Validation failed: qty="${qty}" is not a number`);
-                }
-            } else {
-                console.log(`   ⚠️ First part "${firstPart}" is not a number`);
-            }
-        } else {
-            console.log(`   ⚠️ Not enough parts: ${parts.length}`);
-        }
-        
-        // Method 2: Regex pattern - very specific to this format
-        // Format: "1   2017001017   KAPUR BESI @PERLUSIN   4   25.000   0   100.000"
-        const match = line.match(/^(\d+)\s+(\S+)\s+(.+?)\s+(\d+)\s+[\d,.]+/);
-        if (match) {
-            const [, no, itemCode, desc, qty] = match;
-            console.log(`   ✅ Regex matched: ${no} | ${itemCode} | ${desc} | ${qty}`);
-            data.items.push({
-                no: no.trim(),
-                item: itemCode.trim(),
-                namaBarang: desc.trim(),
-                quantity: qty.trim()
-            });
-        } else {
-            console.log(`   ❌ Regex didn't match`);
-        }
-    }
-
     return data;
 }
 
@@ -546,28 +364,7 @@ async function processFiles() {
             
             const poData = parsePoData(text);
             
-            // Debug: Log extracted data
-            console.log('📊 Extracted PO Data:', {
-                poNumber: poData.poNumber,
-                poDate: poData.poDate,
-                supplier: poData.supplier,
-                itemCount: poData.items.length,
-                description: poData.description,
-                items: poData.items
-            });
-            
             if (poData.items.length === 0) {
-                console.error('❌ No items found.');
-                console.log('📄 Full text length:', text.length);
-                console.log('📄 Text preview (first 1000 chars):', text.substring(0, 1000));
-                console.log('📄 Text preview (chars 1000-2000):', text.substring(1000, 2000));
-                
-                // Try to show table section if exists
-                const tableMatch = text.match(/No\.?\s+Item[\s\S]{0,500}/i);
-                if (tableMatch) {
-                    console.log('📋 Table section found:', tableMatch[0]);
-                }
-                
                 throw new Error('Tidak ada data item yang ditemukan. Cek Console (F12) untuk detail.');
             }
             
